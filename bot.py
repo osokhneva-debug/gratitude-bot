@@ -26,21 +26,6 @@ db = Database()
 scheduler = AsyncIOScheduler()
 
 
-# Часовые пояса (UTC offset)
-TIMEZONES = {
-    "tz_kaliningrad": ("Калининград", 2),
-    "tz_moscow": ("Москва", 3),
-    "tz_samara": ("Самара", 4),
-    "tz_yekaterinburg": ("Екатеринбург", 5),
-    "tz_omsk": ("Омск", 6),
-    "tz_krasnoyarsk": ("Красноярск", 7),
-    "tz_irkutsk": ("Иркутск", 8),
-    "tz_yakutsk": ("Якутск", 9),
-    "tz_vladivostok": ("Владивосток", 10),
-    "tz_magadan": ("Магадан", 11),
-    "tz_kamchatka": ("Камчатка", 12),
-}
-
 
 # Главное меню с кнопками
 main_menu = ReplyKeyboardMarkup(
@@ -62,7 +47,7 @@ write_keyboard = ReplyKeyboardMarkup(
 
 # Состояния FSM
 class GratitudeStates(StatesGroup):
-    waiting_for_timezone = State()
+    waiting_for_current_time = State()  # Ожидание ввода текущего времени для расчёта часового пояса
     waiting_for_gratitudes = State()
     waiting_for_time = State()
 
@@ -98,98 +83,57 @@ async def cmd_start(message: Message, state: FSMContext):
 
 
 async def ask_timezone(message: Message, state: FSMContext):
-    """Запрос часового пояса"""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🏙 Москва", callback_data="tz_moscow"),
-            InlineKeyboardButton(text="🌊 Калининград", callback_data="tz_kaliningrad"),
-        ],
-        [
-            InlineKeyboardButton(text="🏔 Екатеринбург", callback_data="tz_yekaterinburg"),
-            InlineKeyboardButton(text="🌲 Красноярск", callback_data="tz_krasnoyarsk"),
-        ],
-        [
-            InlineKeyboardButton(text="🐻 Иркутск", callback_data="tz_irkutsk"),
-            InlineKeyboardButton(text="🌅 Владивосток", callback_data="tz_vladivostok"),
-        ],
-        [
-            InlineKeyboardButton(text="Другой город...", callback_data="tz_other"),
-        ]
-    ])
-
-    await state.set_state(GratitudeStates.waiting_for_timezone)
+    """Запрос текущего времени для определения часового пояса"""
+    await state.set_state(GratitudeStates.waiting_for_current_time)
     await message.answer(
-        "🌍 Выбери свой город, чтобы напоминания приходили вовремя:",
-        reply_markup=keyboard
+        "🕐 Сколько сейчас у тебя времени?\n\n"
+        "Напиши в формате ЧЧ:ММ, например: 14:30",
+        reply_markup=ReplyKeyboardRemove()
     )
 
 
-@dp.callback_query(F.data == "tz_other")
-async def show_more_timezones(callback: CallbackQuery):
-    """Показать больше часовых поясов"""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="Самара (+4)", callback_data="tz_samara"),
-            InlineKeyboardButton(text="Омск (+6)", callback_data="tz_omsk"),
-        ],
-        [
-            InlineKeyboardButton(text="Якутск (+9)", callback_data="tz_yakutsk"),
-            InlineKeyboardButton(text="Магадан (+11)", callback_data="tz_magadan"),
-        ],
-        [
-            InlineKeyboardButton(text="Камчатка (+12)", callback_data="tz_kamchatka"),
-        ],
-        [
-            InlineKeyboardButton(text="← Назад", callback_data="tz_back"),
-        ]
-    ])
+@dp.message(GratitudeStates.waiting_for_current_time)
+async def process_current_time(message: Message, state: FSMContext):
+    """Обработка ввода текущего времени для расчёта часового пояса"""
+    try:
+        time_parts = message.text.strip().split(":")
+        user_hour = int(time_parts[0])
+        user_minute = int(time_parts[1]) if len(time_parts) > 1 else 0
 
-    await callback.message.edit_text(
-        "🌍 Выбери свой часовой пояс:",
-        reply_markup=keyboard
-    )
-    await callback.answer()
+        if not (0 <= user_hour <= 23 and 0 <= user_minute <= 59):
+            raise ValueError("Invalid time")
 
+        # Получаем текущее UTC время
+        utc_now = datetime.now(timezone.utc)
 
-@dp.callback_query(F.data == "tz_back")
-async def back_to_main_timezones(callback: CallbackQuery, state: FSMContext):
-    """Вернуться к основным городам"""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🏙 Москва", callback_data="tz_moscow"),
-            InlineKeyboardButton(text="🌊 Калининград", callback_data="tz_kaliningrad"),
-        ],
-        [
-            InlineKeyboardButton(text="🏔 Екатеринбург", callback_data="tz_yekaterinburg"),
-            InlineKeyboardButton(text="🌲 Красноярск", callback_data="tz_krasnoyarsk"),
-        ],
-        [
-            InlineKeyboardButton(text="🐻 Иркутск", callback_data="tz_irkutsk"),
-            InlineKeyboardButton(text="🌅 Владивосток", callback_data="tz_vladivostok"),
-        ],
-        [
-            InlineKeyboardButton(text="Другой город...", callback_data="tz_other"),
-        ]
-    ])
+        # Вычисляем смещение: разница между временем пользователя и UTC
+        user_total_minutes = user_hour * 60 + user_minute
+        utc_total_minutes = utc_now.hour * 60 + utc_now.minute
 
-    await callback.message.edit_text(
-        "🌍 Выбери свой город, чтобы напоминания приходили вовремя:",
-        reply_markup=keyboard
-    )
-    await callback.answer()
+        diff_minutes = user_total_minutes - utc_total_minutes
 
+        # Корректируем если разница больше 12 часов (переход через полночь)
+        if diff_minutes > 720:  # > 12 часов
+            diff_minutes -= 1440  # -24 часа
+        elif diff_minutes < -720:  # < -12 часов
+            diff_minutes += 1440  # +24 часа
 
-@dp.callback_query(F.data.startswith("tz_"), GratitudeStates.waiting_for_timezone)
-async def set_timezone(callback: CallbackQuery, state: FSMContext):
-    """Установка часового пояса"""
-    tz_key = callback.data
+        # Округляем до целого часа
+        offset = round(diff_minutes / 60)
 
-    if tz_key in TIMEZONES:
-        city, offset = TIMEZONES[tz_key]
-        await db.set_user_timezone(callback.from_user.id, offset)
+        # Ограничиваем диапазон UTC-12 до UTC+14
+        offset = max(-12, min(14, offset))
 
-        await callback.message.edit_text(
-            f"✅ Отлично! Твой часовой пояс: {city} (UTC+{offset})\n\n"
+        await db.set_user_timezone(message.from_user.id, offset)
+
+        # Форматируем отображение
+        if offset >= 0:
+            tz_display = f"UTC+{offset}"
+        else:
+            tz_display = f"UTC{offset}"
+
+        await message.answer(
+            f"✅ Отлично! Твой часовой пояс: {tz_display}\n\n"
             f"Напоминания будут приходить в 21:00 по твоему времени.\n"
             f"Это можно изменить в настройках."
         )
@@ -197,13 +141,16 @@ async def set_timezone(callback: CallbackQuery, state: FSMContext):
         await state.clear()
         await asyncio.sleep(1)
 
-        await callback.message.answer(
+        await message.answer(
             "Теперь ты готов начать!\n\n"
             "Нажми 📝 Записать, чтобы добавить первую запись.",
             reply_markup=main_menu
         )
 
-    await callback.answer()
+    except (ValueError, IndexError):
+        await message.answer(
+            "❌ Неверный формат. Напиши время как 14:30 или 9:00"
+        )
 
 
 @dp.message(Command("write"))
@@ -366,29 +313,10 @@ async def settings_time(callback: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "settings_tz")
 async def settings_timezone(callback: CallbackQuery, state: FSMContext):
     """Изменение часового пояса"""
-    await state.set_state(GratitudeStates.waiting_for_timezone)
-
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🏙 Москва", callback_data="tz_moscow"),
-            InlineKeyboardButton(text="🌊 Калининград", callback_data="tz_kaliningrad"),
-        ],
-        [
-            InlineKeyboardButton(text="🏔 Екатеринбург", callback_data="tz_yekaterinburg"),
-            InlineKeyboardButton(text="🌲 Красноярск", callback_data="tz_krasnoyarsk"),
-        ],
-        [
-            InlineKeyboardButton(text="🐻 Иркутск", callback_data="tz_irkutsk"),
-            InlineKeyboardButton(text="🌅 Владивосток", callback_data="tz_vladivostok"),
-        ],
-        [
-            InlineKeyboardButton(text="Другой город...", callback_data="tz_other"),
-        ]
-    ])
-
-    await callback.message.edit_text(
-        "🌍 Выбери свой город:",
-        reply_markup=keyboard
+    await state.set_state(GratitudeStates.waiting_for_current_time)
+    await callback.message.answer(
+        "🕐 Сколько сейчас у тебя времени?\n\n"
+        "Напиши в формате ЧЧ:ММ, например: 14:30"
     )
     await callback.answer()
 
