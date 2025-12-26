@@ -433,10 +433,17 @@ async def send_reminders():
         user_tz = timezone(timedelta(hours=user['timezone']))
         user_local_time = utc_now.astimezone(user_tz)
 
+        # Логируем для отладки
+        logging.info(
+            f"User {user['user_id']}: local_time={user_local_time.hour}:{user_local_time.minute:02d}, "
+            f"reminder={user['hour']}:{user['minute']:02d}, tz=UTC+{user['timezone']}"
+        )
+
         # Проверяем, совпадает ли текущее время с временем напоминания
         if (user_local_time.hour == user['hour'] and
             user_local_time.minute == user['minute']):
             try:
+                logging.info(f"Отправляем напоминание пользователю {user['user_id']}")
                 await bot.send_message(
                     user['user_id'],
                     "🌙 Привет!\n\n"
