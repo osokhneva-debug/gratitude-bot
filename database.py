@@ -70,12 +70,31 @@ class Database:
             return [row[0] for row in rows]
 
     async def save_entry(self, user_id: int, gratitudes: List[str]):
-        """Сохранить запись благодарностей"""
+        """Сохранить запись благодарностей (объединяет записи за один день)"""
+        today = datetime.now().strftime("%Y-%m-%d")
+
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(
-                "INSERT INTO entries (user_id, gratitudes, created_at) VALUES (?, ?, ?)",
-                (user_id, json.dumps(gratitudes, ensure_ascii=False), datetime.now().isoformat())
+            # Проверяем, есть ли уже запись за сегодня
+            cursor = await db.execute(
+                "SELECT id, gratitudes FROM entries WHERE user_id = ? AND date(created_at) = ?",
+                (user_id, today)
             )
+            existing = await cursor.fetchone()
+
+            if existing:
+                # Добавляем к существующей записи
+                existing_gratitudes = json.loads(existing[1])
+                existing_gratitudes.extend(gratitudes)
+                await db.execute(
+                    "UPDATE entries SET gratitudes = ? WHERE id = ?",
+                    (json.dumps(existing_gratitudes, ensure_ascii=False), existing[0])
+                )
+            else:
+                # Создаём новую запись
+                await db.execute(
+                    "INSERT INTO entries (user_id, gratitudes, created_at) VALUES (?, ?, ?)",
+                    (user_id, json.dumps(gratitudes, ensure_ascii=False), datetime.now().isoformat())
+                )
             await db.commit()
 
     async def get_entries(self, user_id: int) -> List[Dict]:
