@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import os
 from datetime import datetime, timezone, timedelta
+from aiohttp import web
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
@@ -440,6 +442,11 @@ async def send_reminders():
 
 # ==================== ЗАПУСК ====================
 
+# Простой health-check эндпоинт для Render
+async def health_check(request):
+    return web.Response(text="OK")
+
+
 async def main():
     # Инициализация БД
     await db.init()
@@ -447,6 +454,18 @@ async def main():
     # Настройка напоминаний (проверяем каждую минуту)
     scheduler.add_job(send_reminders, "cron", minute="*")
     scheduler.start()
+
+    # Запуск HTTP-сервера для Render (health check)
+    app = web.Application()
+    app.router.add_get("/", health_check)
+    app.router.add_get("/health", health_check)
+
+    port = int(os.environ.get("PORT", 10000))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logging.info(f"HTTP-сервер запущен на порту {port}")
 
     # Запуск бота
     logging.info("Бот запущен!")
