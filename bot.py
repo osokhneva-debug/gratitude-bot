@@ -197,14 +197,17 @@ async def save_gratitudes(message: Message, state: FSMContext):
         await message.answer("📭 Ты ещё ничего не написал. Напиши хотя бы одну благодарность!")
         return
 
-    # Сохраняем в базу
+    # Сохраняем в базу (объединяет с существующими за сегодня)
     await db.save_entry(message.from_user.id, gratitudes)
+
+    # Получаем объединённый список за сегодня для отображения
+    all_today = await db.get_today_entry(message.from_user.id)
 
     # Получаем количество записей для поздравления
     count = await db.get_entry_count(message.from_user.id)
 
-    # Формируем красивую карточку
-    card = format_card(gratitudes, datetime.now())
+    # Формируем красивую карточку с ПОЛНЫМ списком за день
+    card = format_card(all_today, datetime.now())
 
     # Сообщение с поздравлением для круглых чисел
     congrats = ""
@@ -218,8 +221,17 @@ async def save_gratitudes(message: Message, state: FSMContext):
         congrats = f"\n\n⭐ {count} записей! Отличный результат!"
 
     await state.clear()
+
+    # Показываем добавленное количество и общее за день
+    added = len(gratitudes)
+    total = len(all_today)
+    if added == total:
+        count_msg = f"{total} благодарностей"
+    else:
+        count_msg = f"+{added}, всего за день: {total}"
+
     await message.answer(
-        f"🎉 Запись сохранена! ({len(gratitudes)} благодарностей){congrats}\n\n{card}",
+        f"🎉 Запись сохранена! ({count_msg}){congrats}\n\n{card}",
         reply_markup=main_menu
     )
 

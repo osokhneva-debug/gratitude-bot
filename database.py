@@ -180,3 +180,17 @@ class Database:
                 }
                 for row in rows
             ]
+
+    async def get_today_entry(self, user_id: int) -> Optional[List[str]]:
+        """Получить запись за сегодня (объединённую)"""
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT gratitudes FROM entries WHERE user_id = ? AND date(created_at) = ?",
+                (user_id, today)
+            )
+            row = await cursor.fetchone()
+            if row:
+                return json.loads(row[0])
+            return None
