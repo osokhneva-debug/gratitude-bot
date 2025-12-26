@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import signal
 from datetime import datetime, timezone, timedelta
 from aiohttp import web
 
@@ -453,9 +454,33 @@ async def health_check(request):
     return web.Response(text="OK")
 
 
+async def shutdown(sig, loop):
+    """Корректное завершение при получении сигнала"""
+    logging.info(f"Получен сигнал {sig.name}, завершаем работу...")
+
+    # Останавливаем polling
+    await dp.stop_polling()
+
+    # Останавливаем планировщик
+    scheduler.shutdown(wait=False)
+
+    # Закрываем сессию бота
+    await bot.session.close()
+
+    logging.info("Бот остановлен корректно")
+
+
 async def main():
     # Инициализация БД
     await db.init()
+
+    # Настройка обработки сигналов для graceful shutdown
+    loop = asyncio.get_event_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(
+            sig,
+            lambda s=sig: asyncio.create_task(shutdown(s, loop))
+        )
 
     # Настройка напоминаний (проверяем каждую минуту)
     scheduler.add_job(send_reminders, "cron", minute="*")
