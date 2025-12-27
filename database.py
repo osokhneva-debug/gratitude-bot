@@ -1,7 +1,8 @@
 from typing import Optional, List, Dict
 import asyncpg
 import json
-from datetime import datetime
+import random
+from datetime import datetime, timedelta
 from config import DATABASE_URL
 
 
@@ -184,3 +185,68 @@ class Database:
             if row:
                 return json.loads(row['gratitudes'])
             return None
+
+    async def get_streak(self, user_id: int) -> int:
+        """Подсчитать текущую серию дней подряд с записями"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT DISTINCT DATE(created_at) as entry_date FROM entries WHERE user_id = $1 ORDER BY entry_date DESC",
+                user_id
+            )
+
+            if not rows:
+                return 0
+
+            dates = [row['entry_date'] for row in rows]
+            today = datetime.now().date()
+
+            # Если сегодня нет записи, проверяем со вчера
+            if dates[0] == today:
+                current_date = today
+            elif dates[0] == today - timedelta(days=1):
+                current_date = today - timedelta(days=1)
+            else:
+                return 0  # Серия прервана
+
+            streak = 0
+            for d in dates:
+                if d == current_date:
+                    streak += 1
+                    current_date -= timedelta(days=1)
+                else:
+                    break
+
+            return streak
+
+    async def get_random_throwback(self, user_id: int, min_days_ago: int = 7) -> Optional[Dict]:
+        """Получить случайную запись старше min_days_ago дней"""
+        cutoff_date = datetime.now().date() - timedelta(days=min_days_ago)
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT gratitudes, created_at FROM entries WHERE user_id = $1 AND DATE(created_at) <= $2",
+                user_id, cutoff_date
+            )
+
+            if not rows:
+                return None
+
+            row = random.choice(rows)
+            return {
+                "gratitudes": json.loads(row['gratitudes']),
+                "date": row['created_at']
+            }
+
+    async def get_total_gratitudes_count(self, user_id: int) -> int:
+        """Получить общее количество благодарностей (не записей, а самих благодарностей)"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT gratitudes FROM entries WHERE user_id = $1",
+                user_id
+            )
+
+            total = 0
+            for row in rows:
+                gratitudes = json.loads(row['gratitudes'])
+                total += len(gratitudes)
+            return total

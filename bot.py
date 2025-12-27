@@ -280,7 +280,7 @@ async def process_gratitude(message: Message, state: FSMContext):
 @dp.message(Command("diary"))
 @dp.message(F.text == "📖 Дневник")
 async def cmd_diary(message: Message):
-    """Показать архив записей"""
+    """Показать архив записей со статистикой"""
     entries = await db.get_entries(message.from_user.id)
 
     if not entries:
@@ -289,6 +289,35 @@ async def cmd_diary(message: Message):
             reply_markup=main_menu
         )
         return
+
+    # Получаем статистику
+    streak = await db.get_streak(message.from_user.id)
+    total_gratitudes = await db.get_total_gratitudes_count(message.from_user.id)
+    total_days = len(entries)
+
+    # Формируем шапку со статистикой
+    streak_emoji = "🔥" if streak > 0 else "💤"
+    stats_header = (
+        f"📊 <b>Твоя статистика</b>\n"
+        f"{streak_emoji} Серия: {streak} дней подряд\n"
+        f"📝 Записей: {total_days} | Благодарностей: {total_gratitudes}\n"
+    )
+
+    # Проверяем throwback (случайная старая запись)
+    throwback = await db.get_random_throwback(message.from_user.id)
+    throwback_text = ""
+    if throwback:
+        tb_date = throwback["date"].strftime("%d.%m.%Y")
+        tb_sample = throwback["gratitudes"][0][:50]
+        if len(throwback["gratitudes"][0]) > 50:
+            tb_sample += "..."
+        throwback_text = f"\n💫 <b>Воспоминание ({tb_date}):</b>\n<i>«{tb_sample}»</i>\n"
+
+    await message.answer(
+        f"{stats_header}{throwback_text}\n─────────────────",
+        parse_mode="HTML",
+        reply_markup=main_menu
+    )
 
     # Показываем последнюю запись с кнопками навигации
     await show_entry(message, entries, len(entries) - 1)
