@@ -428,15 +428,23 @@ async def send_reminders():
     users = await db.get_all_users_with_settings()
     utc_now = datetime.now(timezone.utc)
 
+    logging.info(f"Checking reminders, UTC now: {utc_now.hour}:{utc_now.minute:02d}, users: {len(users)}")
+
     for user in users:
         # Вычисляем локальное время пользователя
         user_tz = timezone(timedelta(hours=user['timezone']))
         user_local_time = utc_now.astimezone(user_tz)
 
+        logging.info(
+            f"User {user['user_id']}: local={user_local_time.hour}:{user_local_time.minute:02d}, "
+            f"reminder={user['hour']}:{user['minute']:02d}, tz={user['timezone']}"
+        )
+
         # Проверяем, совпадает ли текущее время с временем напоминания
         if (user_local_time.hour == user['hour'] and
             user_local_time.minute == user['minute']):
             try:
+                logging.info(f"MATCH! Sending reminder to {user['user_id']}")
                 await bot.send_message(
                     user['user_id'],
                     "🌙 Привет!\n\n"
