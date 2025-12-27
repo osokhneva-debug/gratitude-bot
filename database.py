@@ -61,7 +61,7 @@ class Database:
 
     async def save_entry(self, user_id: int, gratitudes: List[str]):
         """Сохранить запись благодарностей (объединяет записи за один день)"""
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = datetime.now().date()
 
         async with self.pool.acquire() as conn:
             # Проверяем, есть ли уже запись за сегодня
@@ -164,7 +164,7 @@ class Database:
 
     async def get_today_entry(self, user_id: int) -> Optional[List[str]]:
         """Получить запись за сегодня (объединённую)"""
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = datetime.now().date()
 
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
