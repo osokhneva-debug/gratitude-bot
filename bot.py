@@ -18,7 +18,7 @@ from aiogram.fsm.state import State, StatesGroup
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from database import Database
-from config import BOT_TOKEN
+from config import BOT_TOKEN, ADMIN_IDS
 
 # Логирование
 logging.basicConfig(level=logging.INFO)
@@ -292,6 +292,37 @@ async def cmd_diary(message: Message):
 
     # Показываем последнюю запись с кнопками навигации
     await show_entry(message, entries, len(entries) - 1)
+
+
+@dp.message(Command("admin"))
+async def cmd_admin(message: Message):
+    """Админская панель — только для админов"""
+    if message.from_user.id not in ADMIN_IDS:
+        return  # Молча игнорируем для не-админов
+
+    stats = await db.get_stats()
+    user_ids = await db.get_all_users()
+
+    # Получаем информацию о пользователях
+    users_info = []
+    for user_id in user_ids:
+        try:
+            chat = await bot.get_chat(user_id)
+            name = chat.full_name or "Без имени"
+            username = f"@{chat.username}" if chat.username else ""
+            users_info.append(f"• {name} {username} (ID: {user_id})")
+        except:
+            users_info.append(f"• ID: {user_id}")
+
+    users_list = "\n".join(users_info) if users_info else "Пока нет пользователей"
+
+    await message.answer(
+        f"📊 <b>Статистика бота</b>\n\n"
+        f"👥 Пользователей: {stats['users']}\n"
+        f"📝 Записей: {stats['entries']}\n\n"
+        f"<b>Пользователи:</b>\n{users_list}",
+        parse_mode="HTML"
+    )
 
 
 @dp.message(Command("help"))

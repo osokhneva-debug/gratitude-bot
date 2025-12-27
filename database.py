@@ -59,6 +59,16 @@ class Database:
             rows = await conn.fetch("SELECT user_id FROM users")
             return [row['user_id'] for row in rows]
 
+    async def get_stats(self) -> Dict:
+        """Получить статистику для админки"""
+        async with self.pool.acquire() as conn:
+            users_count = await conn.fetchval("SELECT COUNT(*) FROM users")
+            entries_count = await conn.fetchval("SELECT COUNT(*) FROM entries")
+            return {
+                "users": users_count,
+                "entries": entries_count
+            }
+
     async def save_entry(self, user_id: int, gratitudes: List[str]):
         """Сохранить запись благодарностей (объединяет записи за один день)"""
         today = datetime.now().date()

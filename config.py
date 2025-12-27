@@ -14,3 +14,6 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL не установлен! Добавь его в переменные окружения.")
+
+# ID администраторов (могут смотреть статистику)
+ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()]
