@@ -55,6 +55,30 @@ class GratitudeStates(StatesGroup):
     waiting_for_time = State()
 
 
+def parse_time(text: str) -> tuple[int, int]:
+    """Парсинг времени в разных форматах: 12:30, 12.30, 12 30, 1230"""
+    text = text.strip()
+
+    # Пробуем разные разделители
+    for sep in [":", ".", " "]:
+        if sep in text:
+            parts = text.split(sep)
+            hour = int(parts[0])
+            minute = int(parts[1]) if len(parts) > 1 else 0
+            return hour, minute
+
+    # Без разделителя: 1230 -> 12:30, 930 -> 9:30
+    if text.isdigit():
+        if len(text) == 4:
+            return int(text[:2]), int(text[2:])
+        elif len(text) == 3:
+            return int(text[0]), int(text[1:])
+        elif len(text) <= 2:
+            return int(text), 0
+
+    raise ValueError("Cannot parse time")
+
+
 # ==================== ХЕНДЛЕРЫ ====================
 
 @dp.message(Command("start"))
@@ -99,9 +123,7 @@ async def ask_timezone(message: Message, state: FSMContext):
 async def process_current_time(message: Message, state: FSMContext):
     """Обработка ввода текущего времени для расчёта часового пояса"""
     try:
-        time_parts = message.text.strip().split(":")
-        user_hour = int(time_parts[0])
-        user_minute = int(time_parts[1]) if len(time_parts) > 1 else 0
+        user_hour, user_minute = parse_time(message.text)
 
         if not (0 <= user_hour <= 23 and 0 <= user_minute <= 59):
             raise ValueError("Invalid time")
@@ -152,7 +174,7 @@ async def process_current_time(message: Message, state: FSMContext):
 
     except (ValueError, IndexError):
         await message.answer(
-            "❌ Неверный формат. Напиши время как 14:30 или 9:00"
+            "❌ Неверный формат. Напиши время, например: 14:30 или 9.00"
         )
 
 
@@ -358,9 +380,7 @@ async def set_time(callback: CallbackQuery, state: FSMContext):
 async def process_custom_time(message: Message, state: FSMContext):
     """Обработка ввода своего времени"""
     try:
-        time_parts = message.text.strip().split(":")
-        hour = int(time_parts[0])
-        minute = int(time_parts[1]) if len(time_parts) > 1 else 0
+        hour, minute = parse_time(message.text)
 
         if not (0 <= hour <= 23 and 0 <= minute <= 59):
             raise ValueError("Invalid time")
@@ -372,7 +392,7 @@ async def process_custom_time(message: Message, state: FSMContext):
             reply_markup=main_menu
         )
     except (ValueError, IndexError):
-        await message.answer("❌ Неверный формат. Напиши время как 21:00 или 9:30")
+        await message.answer("❌ Неверный формат. Напиши время, например: 21:00 или 9.30")
 
 
 async def show_entry(message: Message, entries: list, index: int):
