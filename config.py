@@ -9,5 +9,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не установлен! Добавь его в переменные окружения.")
 
-# Путь к базе данных
-DATABASE_PATH = os.getenv("DATABASE_PATH", "gratitude.db")
+# URL базы данных PostgreSQL (Supabase)
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL не установлен! Добавь его в переменные окружения.")
