@@ -10,7 +10,8 @@ from aiogram.filters import Command
 from aiogram.types import (
     Message, CallbackQuery,
     InlineKeyboardMarkup, InlineKeyboardButton,
-    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
+    BotCommand
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -293,6 +294,29 @@ async def cmd_diary(message: Message):
     await show_entry(message, entries, len(entries) - 1)
 
 
+@dp.message(Command("help"))
+async def cmd_help(message: Message):
+    """Показать справку"""
+    await message.answer(
+        "🙏 <b>Дневник Благодарностей</b>\n\n"
+        "Этот бот помогает вести практику благодарности — "
+        "каждый день записывать, за что ты благодарен.\n\n"
+        "<b>Команды:</b>\n"
+        "/start — перезапустить бота\n"
+        "/write — записать благодарности\n"
+        "/diary — открыть дневник\n"
+        "/settings — настройки\n"
+        "/help — эта справка\n\n"
+        "<b>Как пользоваться:</b>\n"
+        "1. Нажми 📝 Записать\n"
+        "2. Напиши за что благодарен (можно списком)\n"
+        "3. Нажми 💾 Сохранить\n\n"
+        "Бот будет напоминать тебе каждый день в выбранное время.",
+        parse_mode="HTML",
+        reply_markup=main_menu
+    )
+
+
 @dp.message(Command("settings"))
 @dp.message(F.text == "⏰ Настройки")
 async def cmd_settings(message: Message):
@@ -501,6 +525,15 @@ async def shutdown(sig, loop):
 async def main():
     # Инициализация БД
     await db.init()
+
+    # Настройка команд меню бота
+    await bot.set_my_commands([
+        BotCommand(command="start", description="Перезапустить бота"),
+        BotCommand(command="write", description="Записать благодарности"),
+        BotCommand(command="diary", description="Открыть дневник"),
+        BotCommand(command="settings", description="Настройки"),
+        BotCommand(command="help", description="Помощь"),
+    ])
 
     # Настройка обработки сигналов для graceful shutdown
     loop = asyncio.get_event_loop()
