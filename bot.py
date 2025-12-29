@@ -187,9 +187,8 @@ async def cmd_write(message: Message, state: FSMContext):
     await state.update_data(gratitudes=[])
     await message.answer(
         "✨ За что ты благодарен сегодня?\n\n"
-        "Напиши и отправь сообщение (можно списком, каждая с новой строки).\n\n"
-        "Когда закончишь — нажми 💾 Сохранить",
-        reply_markup=write_keyboard
+        "Напиши и отправь сообщение (можно списком, каждая с новой строки).",
+        reply_markup=ReplyKeyboardRemove()
     )
 
 
@@ -260,9 +259,67 @@ async def save_gratitudes(message: Message, state: FSMContext):
     )
 
 
+@dp.callback_query(F.data == "save_gratitudes")
+async def save_gratitudes_inline(callback: CallbackQuery, state: FSMContext):
+    """Сохранить благодарности (inline-кнопка)"""
+    data = await state.get_data()
+    gratitudes = data.get("gratitudes", [])
+
+    if not gratitudes:
+        await callback.answer("Сначала напиши хотя бы одну благодарность!", show_alert=True)
+        return
+
+    # Сохраняем в базу
+    await db.save_entry(callback.from_user.id, gratitudes)
+
+    # Получаем данные для отображения
+    all_today = await db.get_today_entry(callback.from_user.id)
+    count = await db.get_entry_count(callback.from_user.id)
+    card = format_card(all_today, datetime.now())
+
+    # Поздравления
+    congrats = ""
+    if count == 1:
+        congrats = "\n\n🎉 Это твоя первая запись! Отличное начало!"
+    elif count == 7:
+        congrats = "\n\n🔥 Неделя благодарностей! Так держать!"
+    elif count == 30:
+        congrats = "\n\n🏆 30 дней! Ты формируешь привычку!"
+    elif count % 10 == 0:
+        congrats = f"\n\n⭐ {count} записей! Отличный результат!"
+
+    await state.clear()
+
+    added = len(gratitudes)
+    total = len(all_today)
+    count_msg = f"{total} благодарностей" if added == total else f"+{added}, всего за день: {total}"
+
+    # Убираем inline-кнопки из предыдущего сообщения
+    await callback.message.edit_reply_markup(reply_markup=None)
+
+    await callback.message.answer(
+        f"🎉 Запись сохранена! ({count_msg}){congrats}\n\n{card}",
+        reply_markup=main_menu
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "cancel_gratitudes")
+async def cancel_gratitudes_inline(callback: CallbackQuery, state: FSMContext):
+    """Отмена записи (inline-кнопка)"""
+    await state.clear()
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("Действие отменено.", reply_markup=main_menu)
+    await callback.answer()
+
+
 @dp.message(GratitudeStates.waiting_for_gratitudes)
 async def process_gratitude(message: Message, state: FSMContext):
     """Обработка ввода благодарностей"""
+    # Игнорируем команды — они не должны добавляться как благодарности
+    if message.text and message.text.startswith('/'):
+        return
+
     data = await state.get_data()
     gratitudes = data.get("gratitudes", [])
 
@@ -271,9 +328,19 @@ async def process_gratitude(message: Message, state: FSMContext):
     gratitudes.extend(new_items)
 
     await state.update_data(gratitudes=gratitudes)
+
+    # Inline-кнопки для сохранения/отмены
+    inline_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="💾 Сохранить", callback_data="save_gratitudes"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_gratitudes")
+        ]
+    ])
+
     await message.answer(
         f"✓ Записано: {len(gratitudes)}\n\n"
-        "Продолжай писать или нажми 💾 Сохранить"
+        "Продолжай писать или сохрани.",
+        reply_markup=inline_kb
     )
 
 
