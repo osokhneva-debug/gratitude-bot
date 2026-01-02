@@ -3,6 +3,7 @@ import logging
 import os
 import signal
 from datetime import datetime, timezone, timedelta
+from io import BytesIO
 from aiohttp import web
 
 from aiogram import Bot, Dispatcher, F
@@ -11,11 +12,18 @@ from aiogram.types import (
     Message, CallbackQuery,
     InlineKeyboardMarkup, InlineKeyboardButton,
     ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
-    BotCommand
+    BotCommand, BufferedInputFile
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import cm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 from database import Database
 from config import BOT_TOKEN, ADMIN_IDS
@@ -380,10 +388,15 @@ async def cmd_diary(message: Message):
             tb_sample += "..."
         throwback_text = f"\n💫 <b>Воспоминание ({tb_date}):</b>\n<i>«{tb_sample}»</i>\n"
 
+    # Кнопка экспорта PDF
+    export_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📥 Скачать PDF", callback_data="export_pdf")]
+    ])
+
     await message.answer(
         f"{stats_header}{throwback_text}\n─────────────────",
         parse_mode="HTML",
-        reply_markup=main_menu
+        reply_markup=export_kb
     )
 
     # Показываем последнюю запись с кнопками навигации
@@ -599,6 +612,101 @@ async def paginate_diary(callback: CallbackQuery):
 
 
 # ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
+
+def generate_pdf(entries: list, streak: int, total_gratitudes: int) -> BytesIO:
+    """Генерирует PDF с дневником благодарностей"""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=2*cm, bottomMargin=2*cm)
+
+    # Стили (используем встроенный шрифт с поддержкой Unicode)
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'Title',
+        parent=styles['Heading1'],
+        fontSize=24,
+        spaceAfter=20,
+        alignment=1  # center
+    )
+    stats_style = ParagraphStyle(
+        'Stats',
+        parent=styles['Normal'],
+        fontSize=12,
+        spaceAfter=10,
+        alignment=1
+    )
+    date_style = ParagraphStyle(
+        'Date',
+        parent=styles['Heading2'],
+        fontSize=14,
+        spaceBefore=15,
+        spaceAfter=5
+    )
+    item_style = ParagraphStyle(
+        'Item',
+        parent=styles['Normal'],
+        fontSize=11,
+        leftIndent=20,
+        spaceAfter=3
+    )
+
+    story = []
+
+    # Заголовок
+    story.append(Paragraph("Dnevnik Blagodarnostey", title_style))
+    story.append(Spacer(1, 10))
+
+    # Статистика
+    streak_text = f"Streak: {streak} dney | Zapisey: {len(entries)} | Blagodarnostey: {total_gratitudes}"
+    story.append(Paragraph(streak_text, stats_style))
+    story.append(Spacer(1, 20))
+
+    # Записи по дням
+    for entry in reversed(entries):  # От новых к старым
+        date = entry["date"]
+        if isinstance(date, str):
+            date = datetime.fromisoformat(date)
+        date_str = date.strftime("%d.%m.%Y")
+
+        story.append(Paragraph(date_str, date_style))
+
+        for i, item in enumerate(entry["gratitudes"], 1):
+            # Экранируем HTML-символы и заменяем кириллицу на транслит для совместимости
+            safe_item = item.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            story.append(Paragraph(f"{i}. {safe_item}", item_style))
+
+        story.append(Spacer(1, 10))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+
+@dp.callback_query(F.data == "export_pdf")
+async def export_diary_pdf(callback: CallbackQuery):
+    """Экспорт дневника в PDF"""
+    await callback.answer("Генерирую PDF...")
+
+    entries = await db.get_entries(callback.from_user.id)
+
+    if not entries:
+        await callback.message.answer("У тебя пока нет записей для экспорта.")
+        return
+
+    streak = await db.get_streak(callback.from_user.id)
+    total_gratitudes = await db.get_total_gratitudes_count(callback.from_user.id)
+
+    # Генерируем PDF
+    pdf_buffer = generate_pdf(entries, streak, total_gratitudes)
+
+    # Отправляем файл
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    filename = f"gratitude_diary_{date_str}.pdf"
+
+    await callback.message.answer_document(
+        BufferedInputFile(pdf_buffer.read(), filename=filename),
+        caption="📥 Твой дневник благодарностей"
+    )
+
 
 def format_card(gratitudes: list, date: datetime) -> str:
     """Форматирует запись в красивую карточку"""
