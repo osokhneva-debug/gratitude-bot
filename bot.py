@@ -757,24 +757,45 @@ async def send_reminders():
 
 # ==================== ЗАПУСК ====================
 
-# Простой health-check эндпоинт для Render
-async def health_check(request):
+# URL для webhook (установи в переменных окружения на Render)
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")  # например: https://gratitude-bot-8h4i.onrender.com
+
+
+async def webhook_handler(request):
+    """Обработчик входящих обновлений от Telegram"""
+    try:
+        data = await request.json()
+        from aiogram.types import Update
+        update = Update(**data)
+        await dp.feed_update(bot, update)
+    except Exception as e:
+        logging.error(f"Ошибка обработки webhook: {e}")
     return web.Response(text="OK")
 
 
-async def shutdown(sig, loop):
-    """Корректное завершение при получении сигнала"""
-    logging.info(f"Получен сигнал {sig.name}, завершаем работу...")
+async def health_check(request):
+    """Health-check эндпоинт для Render"""
+    return web.Response(text="OK")
 
-    # Останавливаем polling
-    await dp.stop_polling()
 
-    # Останавливаем планировщик
+async def on_startup():
+    """Действия при запуске бота"""
+    # Удаляем старый webhook и устанавливаем новый
+    if WEBHOOK_URL:
+        await bot.delete_webhook(drop_pending_updates=True)
+        await bot.set_webhook(f"{WEBHOOK_URL}/webhook")
+        logging.info(f"Webhook установлен: {WEBHOOK_URL}/webhook")
+    else:
+        logging.warning("WEBHOOK_URL не установлен! Бот работает в режиме polling (не рекомендуется)")
+
+
+async def on_shutdown():
+    """Действия при остановке бота"""
+    logging.info("Завершаем работу...")
     scheduler.shutdown(wait=False)
-
-    # Закрываем сессию бота
+    if WEBHOOK_URL:
+        await bot.delete_webhook()
     await bot.session.close()
-
     logging.info("Бот остановлен корректно")
 
 
@@ -791,22 +812,19 @@ async def main():
         BotCommand(command="help", description="Помощь"),
     ])
 
-    # Настройка обработки сигналов для graceful shutdown
-    loop = asyncio.get_event_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(
-            sig,
-            lambda s=sig: asyncio.create_task(shutdown(s, loop))
-        )
-
     # Настройка напоминаний (проверяем каждую минуту)
     scheduler.add_job(send_reminders, "cron", minute="*")
     scheduler.start()
 
-    # Запуск HTTP-сервера для Render (health check)
+    # Создаём веб-приложение
     app = web.Application()
     app.router.add_get("/", health_check)
     app.router.add_get("/health", health_check)
+    app.router.add_post("/webhook", webhook_handler)
+
+    # Регистрируем события запуска/остановки
+    app.on_startup.append(lambda _: on_startup())
+    app.on_shutdown.append(lambda _: on_shutdown())
 
     port = int(os.environ.get("PORT", 10000))
     runner = web.AppRunner(app)
@@ -815,9 +833,15 @@ async def main():
     await site.start()
     logging.info(f"HTTP-сервер запущен на порту {port}")
 
-    # Запуск бота
-    logging.info("Бот запущен!")
-    await dp.start_polling(bot, drop_pending_updates=True)
+    # Если webhook не настроен — используем polling (для локальной разработки)
+    if WEBHOOK_URL:
+        logging.info("Бот запущен в режиме webhook!")
+        # Держим приложение запущенным
+        while True:
+            await asyncio.sleep(3600)
+    else:
+        logging.info("Бот запущен в режиме polling (локальная разработка)")
+        await dp.start_polling(bot, drop_pending_updates=True)
 
 
 if __name__ == "__main__":
