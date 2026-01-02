@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import re
 import signal
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
@@ -88,12 +89,19 @@ def parse_time(text: str) -> tuple[int, int]:
     raise ValueError("Cannot parse time")
 
 
+def extract_mentions(text: str) -> list[str]:
+    """Извлекает все @username из текста"""
+    pattern = r'@([a-zA-Z][a-zA-Z0-9_]{4,31})'
+    return re.findall(pattern, text)
+
+
 # ==================== ХЕНДЛЕРЫ ====================
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
     """Приветствие и онбординг"""
-    is_new = await db.add_user(message.from_user.id)
+    username = message.from_user.username
+    is_new = await db.add_user(message.from_user.id, username)
 
     if is_new:
         # Новый пользователь — показываем онбординг
@@ -113,6 +121,10 @@ async def cmd_start(message: Message, state: FSMContext):
             disable_web_page_preview=True
         )
 
+        # Проверяем отложенные благодарности для нового пользователя
+        if username:
+            await deliver_pending_gratitudes(message.from_user.id, username)
+
         # Запрашиваем часовой пояс
         await asyncio.sleep(1)
         await ask_timezone(message, state)
@@ -123,6 +135,10 @@ async def cmd_start(message: Message, state: FSMContext):
             "Выбери действие:",
             reply_markup=main_menu
         )
+
+        # Проверяем отложенные благодарности
+        if username:
+            await deliver_pending_gratitudes(message.from_user.id, username)
 
 
 async def ask_timezone(message: Message, state: FSMContext):
@@ -241,6 +257,9 @@ async def save_gratitudes(message: Message, state: FSMContext):
     # Сохраняем в базу (объединяет с существующими за сегодня)
     await db.save_entry(message.from_user.id, gratitudes)
 
+    # Обрабатываем упоминания и отправляем уведомления
+    await process_gratitude_mentions(message.from_user.id, gratitudes)
+
     # Получаем объединённый список за сегодня для отображения
     all_today = await db.get_today_entry(message.from_user.id)
 
@@ -289,6 +308,9 @@ async def save_gratitudes_inline(callback: CallbackQuery, state: FSMContext):
 
     # Сохраняем в базу
     await db.save_entry(callback.from_user.id, gratitudes)
+
+    # Обрабатываем упоминания и отправляем уведомления
+    await process_gratitude_mentions(callback.from_user.id, gratitudes)
 
     # Получаем данные для отображения
     all_today = await db.get_today_entry(callback.from_user.id)
@@ -621,7 +643,104 @@ async def paginate_diary(callback: CallbackQuery):
     await callback.answer()
 
 
+@dp.callback_query(F.data.startswith("thank_back_"))
+async def thank_back(callback: CallbackQuery, state: FSMContext):
+    """Поблагодарить в ответ"""
+    # Извлекаем user_id того, кому отвечаем
+    target_user_id = int(callback.data.split("_")[2])
+    target_username = await db.get_username_by_id(target_user_id)
+
+    # Сохраняем в state для использования при сохранении
+    await state.update_data(
+        gratitudes=[],
+        thank_back_to=target_user_id,
+        thank_back_username=target_username
+    )
+    await state.set_state(GratitudeStates.waiting_for_gratitudes)
+
+    target_name = f"@{target_username}" if target_username else "этого человека"
+
+    await callback.message.answer(
+        f"📝 Напиши благодарность для {target_name}:\n\n"
+        f"Можешь упомянуть {target_name} в тексте, чтобы они получили уведомление.",
+        reply_markup=write_keyboard
+    )
+    await callback.answer()
+
+
 # ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
+
+async def deliver_pending_gratitudes(user_id: int, username: str):
+    """Доставляет отложенные благодарности пользователю"""
+    pending = await db.get_pending_gratitudes(username)
+
+    for gratitude in pending:
+        try:
+            reply_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text="📝 Поблагодарить в ответ",
+                    callback_data=f"thank_back_{gratitude['from_user_id']}"
+                )]
+            ])
+
+            sender_name = f"@{gratitude['from_username']}" if gratitude['from_username'] else "Кто-то"
+            date_str = gratitude['date'].strftime("%d.%m.%Y")
+
+            await bot.send_message(
+                user_id,
+                f"🙏 <b>{sender_name} поблагодарил тебя ({date_str}):</b>\n\n"
+                f"«{gratitude['text']}»",
+                parse_mode="HTML",
+                reply_markup=reply_kb
+            )
+
+            # Отмечаем как доставленную
+            await db.mark_gratitude_delivered(gratitude['id'])
+            logging.info(f"Delivered pending gratitude {gratitude['id']} to {user_id}")
+
+            await asyncio.sleep(0.5)  # Пауза между сообщениями
+        except Exception as e:
+            logging.error(f"Failed to deliver pending gratitude: {e}")
+
+
+async def process_gratitude_mentions(from_user_id: int, gratitudes: list[str]):
+    """Обрабатывает упоминания в благодарностях и отправляет уведомления"""
+    from_username = await db.get_username_by_id(from_user_id)
+
+    for text in gratitudes:
+        mentions = extract_mentions(text)
+
+        for mention in mentions:
+            # Ищем пользователя по username
+            to_user_id = await db.get_user_by_username(mention)
+
+            if to_user_id:
+                # Пользователь в боте — отправляем уведомление
+                try:
+                    reply_kb = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(
+                            text="📝 Поблагодарить в ответ",
+                            callback_data=f"thank_back_{from_user_id}"
+                        )]
+                    ])
+
+                    sender_name = f"@{from_username}" if from_username else "Кто-то"
+
+                    await bot.send_message(
+                        to_user_id,
+                        f"🙏 <b>{sender_name} поблагодарил тебя:</b>\n\n"
+                        f"«{text}»",
+                        parse_mode="HTML",
+                        reply_markup=reply_kb
+                    )
+                    logging.info(f"Sent gratitude notification from {from_user_id} to {to_user_id}")
+                except Exception as e:
+                    logging.error(f"Failed to send gratitude notification: {e}")
+            else:
+                # Пользователя нет в боте — сохраняем отложенную благодарность
+                await db.save_pending_gratitude(from_user_id, mention, text)
+                logging.info(f"Saved pending gratitude for @{mention}")
+
 
 def generate_pdf(entries: list, streak: int, total_gratitudes: int) -> BytesIO:
     """Генерирует PDF с дневником благодарностей"""

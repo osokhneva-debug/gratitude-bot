@@ -19,11 +19,23 @@ class Database:
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     user_id BIGINT PRIMARY KEY,
+                    username TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     reminder_hour INTEGER DEFAULT 21,
                     reminder_minute INTEGER DEFAULT 0,
                     timezone INTEGER DEFAULT 3
                 )
+            """)
+
+            # Добавляем колонку username если её нет (миграция)
+            await conn.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                                   WHERE table_name='users' AND column_name='username') THEN
+                        ALTER TABLE users ADD COLUMN username TEXT;
+                    END IF;
+                END $$;
             """)
 
             # Таблица записей благодарностей
@@ -36,7 +48,19 @@ class Database:
                 )
             """)
 
-    async def add_user(self, user_id: int) -> bool:
+            # Таблица отложенных благодарностей (для тех, кто ещё не в боте)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS pending_gratitudes (
+                    id SERIAL PRIMARY KEY,
+                    from_user_id BIGINT REFERENCES users(user_id),
+                    to_username TEXT NOT NULL,
+                    gratitude_text TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    delivered BOOLEAN DEFAULT FALSE
+                )
+            """)
+
+    async def add_user(self, user_id: int, username: str = None) -> bool:
         """Добавить пользователя. Возвращает True если новый."""
         async with self.pool.acquire() as conn:
             # Проверяем, существует ли пользователь
@@ -47,10 +71,17 @@ class Database:
 
             if not row:
                 await conn.execute(
-                    "INSERT INTO users (user_id) VALUES ($1)",
-                    user_id
+                    "INSERT INTO users (user_id, username) VALUES ($1, $2)",
+                    user_id, username.lower() if username else None
                 )
                 return True  # Новый пользователь
+            else:
+                # Обновляем username если изменился
+                if username:
+                    await conn.execute(
+                        "UPDATE users SET username = $1 WHERE user_id = $2",
+                        username.lower(), user_id
+                    )
 
             return False  # Уже существует
 
@@ -271,3 +302,60 @@ class Database:
                 user_id
             )
             return int(result)
+
+    async def get_user_by_username(self, username: str) -> Optional[int]:
+        """Найти user_id по username"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT user_id FROM users WHERE username = $1",
+                username.lower().lstrip('@')
+            )
+            return row['user_id'] if row else None
+
+    async def get_username_by_id(self, user_id: int) -> Optional[str]:
+        """Получить username по user_id"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT username FROM users WHERE user_id = $1",
+                user_id
+            )
+            return row['username'] if row else None
+
+    async def save_pending_gratitude(self, from_user_id: int, to_username: str, text: str):
+        """Сохранить отложенную благодарность для пользователя, которого нет в боте"""
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO pending_gratitudes (from_user_id, to_username, gratitude_text)
+                   VALUES ($1, $2, $3)""",
+                from_user_id, to_username.lower().lstrip('@'), text
+            )
+
+    async def get_pending_gratitudes(self, username: str) -> List[Dict]:
+        """Получить все отложенные благодарности для пользователя"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT pg.id, pg.from_user_id, pg.gratitude_text, pg.created_at, u.username as from_username
+                   FROM pending_gratitudes pg
+                   JOIN users u ON pg.from_user_id = u.user_id
+                   WHERE pg.to_username = $1 AND pg.delivered = FALSE
+                   ORDER BY pg.created_at ASC""",
+                username.lower().lstrip('@')
+            )
+            return [
+                {
+                    "id": row['id'],
+                    "from_user_id": row['from_user_id'],
+                    "from_username": row['from_username'],
+                    "text": row['gratitude_text'],
+                    "date": row['created_at']
+                }
+                for row in rows
+            ]
+
+    async def mark_gratitude_delivered(self, gratitude_id: int):
+        """Отметить благодарность как доставленную"""
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE pending_gratitudes SET delivered = TRUE WHERE id = $1",
+                gratitude_id
+            )
