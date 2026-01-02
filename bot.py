@@ -616,35 +616,35 @@ def format_card(gratitudes: list, date: datetime) -> str:
 
 
 async def send_reminders():
-    """Отправка напоминаний с учётом часовых поясов"""
-    users = await db.get_all_users_with_settings()
+    """Отправка напоминаний с учётом часовых поясов (оптимизировано)"""
     utc_now = datetime.now(timezone.utc)
 
-    logging.info(f"Checking reminders, UTC now: {utc_now.hour}:{utc_now.minute:02d}, users: {len(users)}")
+    # Получаем только тех пользователей, кому нужно отправить сейчас
+    users_to_notify = await db.get_users_for_reminder(utc_now.hour, utc_now.minute)
 
-    for user in users:
-        # Вычисляем локальное время пользователя
-        user_tz = timezone(timedelta(hours=user['timezone']))
-        user_local_time = utc_now.astimezone(user_tz)
+    if users_to_notify:
+        logging.info(f"Sending reminders to {len(users_to_notify)} users at UTC {utc_now.hour}:{utc_now.minute:02d}")
 
-        logging.info(
-            f"User {user['user_id']}: local={user_local_time.hour}:{user_local_time.minute:02d}, "
-            f"reminder={user['hour']}:{user['minute']:02d}, tz={user['timezone']}"
-        )
+    sent_count = 0
+    error_count = 0
 
-        # Проверяем, совпадает ли текущее время с временем напоминания
-        if (user_local_time.hour == user['hour'] and
-            user_local_time.minute == user['minute']):
-            try:
-                logging.info(f"MATCH! Sending reminder to {user['user_id']}")
-                await bot.send_message(
-                    user['user_id'],
-                    "🌙 Привет!\n\n"
-                    "За что ты благодарен сегодня?",
-                    reply_markup=main_menu
-                )
-            except Exception as e:
-                logging.error(f"Не удалось отправить напоминание {user['user_id']}: {e}")
+    for user_id in users_to_notify:
+        try:
+            await bot.send_message(
+                user_id,
+                "🌙 Привет!\n\n"
+                "За что ты благодарен сегодня?",
+                reply_markup=main_menu
+            )
+            sent_count += 1
+            # Rate limiting: пауза между сообщениями (Telegram limit: 30 msg/sec)
+            await asyncio.sleep(0.05)
+        except Exception as e:
+            error_count += 1
+            logging.error(f"Не удалось отправить напоминание {user_id}: {e}")
+
+    if sent_count > 0 or error_count > 0:
+        logging.info(f"Reminders: sent={sent_count}, errors={error_count}")
 
 
 # ==================== ЗАПУСК ====================

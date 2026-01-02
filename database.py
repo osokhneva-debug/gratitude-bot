@@ -96,13 +96,19 @@ class Database:
                     user_id, json.dumps(gratitudes, ensure_ascii=False), datetime.now()
                 )
 
-    async def get_entries(self, user_id: int) -> List[Dict]:
-        """Получить все записи пользователя"""
+    async def get_entries(self, user_id: int, limit: int = None, offset: int = 0) -> List[Dict]:
+        """Получить записи пользователя с пагинацией"""
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT gratitudes, created_at FROM entries WHERE user_id = $1 ORDER BY created_at ASC",
-                user_id
-            )
+            if limit:
+                rows = await conn.fetch(
+                    "SELECT gratitudes, created_at FROM entries WHERE user_id = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3",
+                    user_id, limit, offset
+                )
+            else:
+                rows = await conn.fetch(
+                    "SELECT gratitudes, created_at FROM entries WHERE user_id = $1 ORDER BY created_at ASC",
+                    user_id
+                )
 
             entries = []
             for row in rows:
@@ -150,7 +156,9 @@ class Database:
             return row['timezone'] if row else 3  # По умолчанию Москва
 
     async def set_user_timezone(self, user_id: int, tz_offset: int):
-        """Установить часовой пояс"""
+        """Установить часовой пояс (с валидацией)"""
+        # Валидация: UTC-12 до UTC+14
+        tz_offset = max(-12, min(14, tz_offset))
         async with self.pool.acquire() as conn:
             await conn.execute(
                 "UPDATE users SET timezone = $1 WHERE user_id = $2",
@@ -172,6 +180,20 @@ class Database:
                 }
                 for row in rows
             ]
+
+    async def get_users_for_reminder(self, utc_hour: int, utc_minute: int) -> List[int]:
+        """Получить пользователей, которым нужно отправить напоминание сейчас (оптимизировано)"""
+        async with self.pool.acquire() as conn:
+            # Фильтруем в SQL: (reminder_hour - timezone) mod 24 = utc_hour
+            rows = await conn.fetch(
+                """
+                SELECT user_id FROM users
+                WHERE reminder_minute = $1
+                AND ((reminder_hour - COALESCE(timezone, 3) + 24) % 24) = $2
+                """,
+                utc_minute, utc_hour
+            )
+            return [row['user_id'] for row in rows]
 
     async def get_today_entry(self, user_id: int) -> Optional[List[str]]:
         """Получить запись за сегодня (объединённую)"""
@@ -238,15 +260,14 @@ class Database:
             }
 
     async def get_total_gratitudes_count(self, user_id: int) -> int:
-        """Получить общее количество благодарностей (не записей, а самих благодарностей)"""
+        """Получить общее количество благодарностей (оптимизировано через JSON)"""
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT gratitudes FROM entries WHERE user_id = $1",
+            # Считаем количество элементов в JSON массиве прямо в SQL
+            result = await conn.fetchval(
+                """
+                SELECT COALESCE(SUM(json_array_length(gratitudes::json)), 0)
+                FROM entries WHERE user_id = $1
+                """,
                 user_id
             )
-
-            total = 0
-            for row in rows:
-                gratitudes = json.loads(row['gratitudes'])
-                total += len(gratitudes)
-            return total
+            return int(result)
