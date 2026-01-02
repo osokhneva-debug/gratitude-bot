@@ -690,6 +690,47 @@ def generate_pdf(entries: list, streak: int, total_gratitudes: int) -> BytesIO:
 
         story.append(Spacer(1, 10))
 
+    # Футер со ссылкой на канал
+    footer_style = ParagraphStyle(
+        'Footer',
+        fontName='DejaVuSans',
+        fontSize=10,
+        spaceBefore=30,
+        alignment=1,
+        textColor='#666666'
+    )
+    link_style = ParagraphStyle(
+        'Link',
+        fontName='DejaVuSans',
+        fontSize=10,
+        alignment=1,
+        textColor='#0066cc'
+    )
+
+    story.append(Spacer(1, 30))
+    story.append(Paragraph("─" * 40, footer_style))
+    story.append(Spacer(1, 10))
+    story.append(Paragraph(
+        "Этот бот создан Ольгой Сохневой — автором канала",
+        footer_style
+    ))
+    story.append(Paragraph(
+        '<a href="https://t.me/remote_love_2" color="#0066cc">«Любовь на удаленке»</a>',
+        link_style
+    ))
+    story.append(Paragraph(
+        "Буду рада твоей подписке на канал — там эксперименты с ИИ,",
+        footer_style
+    ))
+    story.append(Paragraph(
+        "карьерой и привычками, которые вдохновляют пробовать новое",
+        footer_style
+    ))
+    story.append(Paragraph(
+        "и выстраивать жизнь под себя.",
+        footer_style
+    ))
+
     doc.build(story)
     buffer.seek(0)
     return buffer
