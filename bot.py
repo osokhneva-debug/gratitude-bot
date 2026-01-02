@@ -19,7 +19,7 @@ from aiogram.fsm.state import State, StatesGroup
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.pdfbase import pdfmetrics
@@ -628,32 +628,36 @@ def generate_pdf(entries: list, streak: int, total_gratitudes: int) -> BytesIO:
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=2*cm, bottomMargin=2*cm)
 
-    # Стили (используем встроенный шрифт с поддержкой Unicode)
-    styles = getSampleStyleSheet()
+    # Регистрируем шрифт с поддержкой кириллицы
+    import os
+    font_path = os.path.join(os.path.dirname(__file__), 'DejaVuSans.ttf')
+    pdfmetrics.registerFont(TTFont('DejaVuSans', font_path))
+
+    # Стили с кириллическим шрифтом
     title_style = ParagraphStyle(
         'Title',
-        parent=styles['Heading1'],
+        fontName='DejaVuSans',
         fontSize=24,
         spaceAfter=20,
         alignment=1  # center
     )
     stats_style = ParagraphStyle(
         'Stats',
-        parent=styles['Normal'],
+        fontName='DejaVuSans',
         fontSize=12,
         spaceAfter=10,
         alignment=1
     )
     date_style = ParagraphStyle(
         'Date',
-        parent=styles['Heading2'],
+        fontName='DejaVuSans',
         fontSize=14,
         spaceBefore=15,
         spaceAfter=5
     )
     item_style = ParagraphStyle(
         'Item',
-        parent=styles['Normal'],
+        fontName='DejaVuSans',
         fontSize=11,
         leftIndent=20,
         spaceAfter=3
@@ -662,11 +666,11 @@ def generate_pdf(entries: list, streak: int, total_gratitudes: int) -> BytesIO:
     story = []
 
     # Заголовок
-    story.append(Paragraph("Dnevnik Blagodarnostey", title_style))
+    story.append(Paragraph("Дневник Благодарностей", title_style))
     story.append(Spacer(1, 10))
 
     # Статистика
-    streak_text = f"Streak: {streak} dney | Zapisey: {len(entries)} | Blagodarnostey: {total_gratitudes}"
+    streak_text = f"Серия: {streak} дней | Записей: {len(entries)} | Благодарностей: {total_gratitudes}"
     story.append(Paragraph(streak_text, stats_style))
     story.append(Spacer(1, 20))
 
