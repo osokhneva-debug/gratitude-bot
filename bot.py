@@ -221,7 +221,8 @@ async def cmd_write(message: Message, state: FSMContext):
     await state.update_data(gratitudes=[])
     await message.answer(
         "✨ За что ты благодарен сегодня?\n\n"
-        "Напиши и отправь сообщение (можно списком, каждая с новой строки).",
+        "Напиши и отправь сообщение (можно списком, каждая с новой строки).\n\n"
+        "💡 Упомяни @username, чтобы отправить благодарность конкретному человеку.",
         reply_markup=ReplyKeyboardRemove()
     )
 
@@ -258,7 +259,7 @@ async def save_gratitudes(message: Message, state: FSMContext):
     await db.save_entry(message.from_user.id, gratitudes)
 
     # Обрабатываем упоминания и отправляем уведомления
-    await process_gratitude_mentions(message.from_user.id, gratitudes)
+    mention_status = await process_gratitude_mentions(message.from_user.id, gratitudes)
 
     # Получаем объединённый список за сегодня для отображения
     all_today = await db.get_today_entry(message.from_user.id)
@@ -280,6 +281,16 @@ async def save_gratitudes(message: Message, state: FSMContext):
     elif count % 10 == 0:
         congrats = f"\n\n⭐ {count} записей! Отличный результат!"
 
+    # Формируем сообщение о статусе упоминаний
+    mention_msg = ""
+    if mention_status["pending"]:
+        pending_users = ", ".join([f"@{u}" for u in mention_status["pending"]])
+        mention_msg = (
+            f"\n\n💌 {pending_users} еще не использует бота и получит уведомление, "
+            f"когда присоединится к нему.\n"
+            f"Можешь пригласить его, отправив ссылку https://t.me/thanksworld_bot"
+        )
+
     await state.clear()
 
     # Показываем добавленное количество и общее за день
@@ -291,8 +302,9 @@ async def save_gratitudes(message: Message, state: FSMContext):
         count_msg = f"+{added}, всего за день: {total}"
 
     await message.answer(
-        f"🎉 Запись сохранена! ({count_msg}){congrats}\n\n{card}",
-        reply_markup=main_menu
+        f"🎉 Запись сохранена! ({count_msg}){congrats}{mention_msg}\n\n{card}",
+        reply_markup=main_menu,
+        disable_web_page_preview=True
     )
 
 
@@ -310,7 +322,7 @@ async def save_gratitudes_inline(callback: CallbackQuery, state: FSMContext):
     await db.save_entry(callback.from_user.id, gratitudes)
 
     # Обрабатываем упоминания и отправляем уведомления
-    await process_gratitude_mentions(callback.from_user.id, gratitudes)
+    mention_status = await process_gratitude_mentions(callback.from_user.id, gratitudes)
 
     # Получаем данные для отображения
     all_today = await db.get_today_entry(callback.from_user.id)
@@ -328,6 +340,16 @@ async def save_gratitudes_inline(callback: CallbackQuery, state: FSMContext):
     elif count % 10 == 0:
         congrats = f"\n\n⭐ {count} записей! Отличный результат!"
 
+    # Формируем сообщение о статусе упоминаний
+    mention_msg = ""
+    if mention_status["pending"]:
+        pending_users = ", ".join([f"@{u}" for u in mention_status["pending"]])
+        mention_msg = (
+            f"\n\n💌 {pending_users} еще не использует бота и получит уведомление, "
+            f"когда присоединится к нему.\n"
+            f"Можешь пригласить его, отправив ссылку https://t.me/thanksworld_bot"
+        )
+
     await state.clear()
 
     added = len(gratitudes)
@@ -338,8 +360,9 @@ async def save_gratitudes_inline(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_reply_markup(reply_markup=None)
 
     await callback.message.answer(
-        f"🎉 Запись сохранена! ({count_msg}){congrats}\n\n{card}",
-        reply_markup=main_menu
+        f"🎉 Запись сохранена! ({count_msg}){congrats}{mention_msg}\n\n{card}",
+        reply_markup=main_menu,
+        disable_web_page_preview=True
     )
     await callback.answer()
 
@@ -483,6 +506,9 @@ async def cmd_help(message: Message):
         "1. Нажми 📝 Записать\n"
         "2. Напиши за что благодарен (можно списком)\n"
         "3. Нажми 💾 Сохранить\n\n"
+        "<b>💡 Благодарности для других:</b>\n"
+        "Упомяни @username в своей записи, чтобы человек получил уведомление. "
+        "Если у него еще нет бота — благодарность дойдет, когда он присоединится!\n\n"
         "Бот будет напоминать тебе каждый день в выбранное время.",
         parse_mode="HTML",
         reply_markup=main_menu
@@ -703,9 +729,15 @@ async def deliver_pending_gratitudes(user_id: int, username: str):
             logging.error(f"Failed to deliver pending gratitude: {e}")
 
 
-async def process_gratitude_mentions(from_user_id: int, gratitudes: list[str]):
-    """Обрабатывает упоминания в благодарностях и отправляет уведомления"""
+async def process_gratitude_mentions(from_user_id: int, gratitudes: list[str]) -> dict:
+    """Обрабатывает упоминания в благодарностях и отправляет уведомления
+
+    Возвращает:
+        dict: {"delivered": [username, ...], "pending": [username, ...]}
+    """
     from_username = await db.get_username_by_id(from_user_id)
+    delivered = []
+    pending = []
 
     for text in gratitudes:
         mentions = extract_mentions(text)
@@ -733,13 +765,17 @@ async def process_gratitude_mentions(from_user_id: int, gratitudes: list[str]):
                         parse_mode="HTML",
                         reply_markup=reply_kb
                     )
+                    delivered.append(mention)
                     logging.info(f"Sent gratitude notification from {from_user_id} to {to_user_id}")
                 except Exception as e:
                     logging.error(f"Failed to send gratitude notification: {e}")
             else:
                 # Пользователя нет в боте — сохраняем отложенную благодарность
                 await db.save_pending_gratitude(from_user_id, mention, text)
+                pending.append(mention)
                 logging.info(f"Saved pending gratitude for @{mention}")
+
+    return {"delivered": delivered, "pending": pending}
 
 
 def generate_pdf(entries: list, streak: int, total_gratitudes: int) -> BytesIO:
