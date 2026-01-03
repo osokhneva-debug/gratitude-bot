@@ -144,16 +144,32 @@ async def cmd_start(message: Message, state: FSMContext):
 async def ask_timezone(message: Message, state: FSMContext):
     """Запрос текущего времени для определения часового пояса"""
     await state.set_state(GratitudeStates.waiting_for_current_time)
+
+    # Кнопка отмены
+    cancel_keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="❌ Отмена")]],
+        resize_keyboard=True
+    )
+
     await message.answer(
         "🕐 Сколько сейчас у тебя времени?\n\n"
         "Напиши в формате ЧЧ:ММ, например: 14:30",
-        reply_markup=ReplyKeyboardRemove()
+        reply_markup=cancel_keyboard
     )
 
 
 @dp.message(GratitudeStates.waiting_for_current_time)
 async def process_current_time(message: Message, state: FSMContext):
     """Обработка ввода текущего времени для расчёта часового пояса"""
+    # Обработка отмены
+    if message.text == "❌ Отмена":
+        await state.clear()
+        await message.answer(
+            "Действие отменено.",
+            reply_markup=main_menu
+        )
+        return
+
     try:
         user_hour, user_minute = parse_time(message.text)
 
@@ -590,9 +606,17 @@ async def settings_time(callback: CallbackQuery, state: FSMContext):
 async def settings_timezone(callback: CallbackQuery, state: FSMContext):
     """Изменение часового пояса"""
     await state.set_state(GratitudeStates.waiting_for_current_time)
+
+    # Кнопка отмены
+    cancel_keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="❌ Отмена")]],
+        resize_keyboard=True
+    )
+
     await callback.message.answer(
         "🕐 Сколько сейчас у тебя времени?\n\n"
-        "Напиши в формате ЧЧ:ММ, например: 14:30"
+        "Напиши в формате ЧЧ:ММ, например: 14:30",
+        reply_markup=cancel_keyboard
     )
     await callback.answer()
 
