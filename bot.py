@@ -221,8 +221,7 @@ async def cmd_write(message: Message, state: FSMContext):
     await state.update_data(gratitudes=[])
     await message.answer(
         "✨ За что ты благодарен сегодня?\n\n"
-        "Напиши и отправь сообщение (можно списком, каждая с новой строки).\n\n"
-        "💡 Упомяни @username, чтобы отправить благодарность конкретному человеку.",
+        "Напиши списком, а если хочешь поблагодарить кого-то — упомяни @username",
         reply_markup=ReplyKeyboardRemove()
     )
 
@@ -281,16 +280,6 @@ async def save_gratitudes(message: Message, state: FSMContext):
     elif count % 10 == 0:
         congrats = f"\n\n⭐ {count} записей! Отличный результат!"
 
-    # Формируем сообщение о статусе упоминаний
-    mention_msg = ""
-    if mention_status["pending"]:
-        pending_users = ", ".join([f"@{u}" for u in mention_status["pending"]])
-        mention_msg = (
-            f"\n\n💌 {pending_users} еще не использует бота и получит уведомление, "
-            f"когда присоединится к нему.\n"
-            f"Можешь пригласить его, отправив ссылку https://t.me/thanksworld_bot"
-        )
-
     await state.clear()
 
     # Показываем добавленное количество и общее за день
@@ -301,11 +290,22 @@ async def save_gratitudes(message: Message, state: FSMContext):
     else:
         count_msg = f"+{added}, всего за день: {total}"
 
+    # Основное сообщение с результатом
     await message.answer(
-        f"🎉 Запись сохранена! ({count_msg}){congrats}{mention_msg}\n\n{card}",
-        reply_markup=main_menu,
-        disable_web_page_preview=True
+        f"🎉 Запись сохранена! ({count_msg}){congrats}\n\n{card}",
+        reply_markup=main_menu
     )
+
+    # Если есть pending упоминания — показываем отдельным сообщением с кнопкой
+    if mention_status["pending"]:
+        pending_users = ", ".join([f"@{u}" for u in mention_status["pending"]])
+        invite_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Пригласить в бот", url="https://t.me/thanksworld_bot")]
+        ])
+        await message.answer(
+            f"💌 {pending_users} получит твою благодарность, когда присоединится к боту",
+            reply_markup=invite_kb
+        )
 
 
 @dp.callback_query(F.data == "save_gratitudes")
@@ -340,16 +340,6 @@ async def save_gratitudes_inline(callback: CallbackQuery, state: FSMContext):
     elif count % 10 == 0:
         congrats = f"\n\n⭐ {count} записей! Отличный результат!"
 
-    # Формируем сообщение о статусе упоминаний
-    mention_msg = ""
-    if mention_status["pending"]:
-        pending_users = ", ".join([f"@{u}" for u in mention_status["pending"]])
-        mention_msg = (
-            f"\n\n💌 {pending_users} еще не использует бота и получит уведомление, "
-            f"когда присоединится к нему.\n"
-            f"Можешь пригласить его, отправив ссылку https://t.me/thanksworld_bot"
-        )
-
     await state.clear()
 
     added = len(gratitudes)
@@ -359,11 +349,23 @@ async def save_gratitudes_inline(callback: CallbackQuery, state: FSMContext):
     # Убираем inline-кнопки из предыдущего сообщения
     await callback.message.edit_reply_markup(reply_markup=None)
 
+    # Основное сообщение с результатом
     await callback.message.answer(
-        f"🎉 Запись сохранена! ({count_msg}){congrats}{mention_msg}\n\n{card}",
-        reply_markup=main_menu,
-        disable_web_page_preview=True
+        f"🎉 Запись сохранена! ({count_msg}){congrats}\n\n{card}",
+        reply_markup=main_menu
     )
+
+    # Если есть pending упоминания — показываем отдельным сообщением с кнопкой
+    if mention_status["pending"]:
+        pending_users = ", ".join([f"@{u}" for u in mention_status["pending"]])
+        invite_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Пригласить в бот", url="https://t.me/thanksworld_bot")]
+        ])
+        await callback.message.answer(
+            f"💌 {pending_users} получит твою благодарность, когда присоединится к боту",
+            reply_markup=invite_kb
+        )
+
     await callback.answer()
 
 
