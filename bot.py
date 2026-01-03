@@ -312,15 +312,12 @@ async def save_gratitudes(message: Message, state: FSMContext):
         reply_markup=main_menu
     )
 
-    # Если есть pending упоминания — показываем отдельным сообщением с кнопкой
+    # Если есть pending упоминания — показываем отдельным сообщением
     if mention_status["pending"]:
         pending_users = ", ".join([f"@{u}" for u in mention_status["pending"]])
-        invite_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Пригласить в бот", url="https://t.me/thanksworld_bot")]
-        ])
         await message.answer(
-            f"💌 {pending_users} получит твою благодарность, когда присоединится к боту",
-            reply_markup=invite_kb
+            f"💌 {pending_users} получит твою благодарность, когда присоединится к боту\n\n"
+            f"Пригласить: https://t.me/thanksworld_bot"
         )
 
 
@@ -371,15 +368,12 @@ async def save_gratitudes_inline(callback: CallbackQuery, state: FSMContext):
         reply_markup=main_menu
     )
 
-    # Если есть pending упоминания — показываем отдельным сообщением с кнопкой
+    # Если есть pending упоминания — показываем отдельным сообщением
     if mention_status["pending"]:
         pending_users = ", ".join([f"@{u}" for u in mention_status["pending"]])
-        invite_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Пригласить в бот", url="https://t.me/thanksworld_bot")]
-        ])
         await callback.message.answer(
-            f"💌 {pending_users} получит твою благодарность, когда присоединится к боту",
-            reply_markup=invite_kb
+            f"💌 {pending_users} получит твою благодарность, когда присоединится к боту\n\n"
+            f"Пригласить: https://t.me/thanksworld_bot"
         )
 
     await callback.answer()
