@@ -234,6 +234,11 @@ async def process_current_time(message: Message, state: FSMContext):
 @dp.message(F.text == "📝 Записать")
 async def cmd_write(message: Message, state: FSMContext):
     """Начать запись благодарностей"""
+    # Проверяем отложенные благодарности
+    username = message.from_user.username
+    if username:
+        await deliver_pending_gratitudes(message.from_user.id, username)
+
     await state.set_state(GratitudeStates.waiting_for_gratitudes)
     await state.update_data(gratitudes=[])
     await message.answer(
@@ -361,6 +366,11 @@ async def process_gratitude(message: Message, state: FSMContext):
 @dp.message(F.text == "📖 Дневник")
 async def cmd_diary(message: Message):
     """Показать архив записей со статистикой"""
+    # Проверяем отложенные благодарности
+    username = message.from_user.username
+    if username:
+        await deliver_pending_gratitudes(message.from_user.id, username)
+
     entries = await db.get_entries(message.from_user.id)
 
     if not entries:
