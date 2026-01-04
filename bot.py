@@ -726,10 +726,12 @@ async def process_gratitude_mentions(from_user_id: int, gratitudes: list[str]) -
                     delivered.append(mention)
                     logging.info(f"Sent gratitude notification from {from_user_id} to {to_user_id}")
                 except Exception as e:
-                    # Не удалось отправить (пользователь заблокировал бота или удалил аккаунт)
-                    logging.error(f"Failed to send gratitude notification to @{mention}: {e}")
-                    # Не показываем как pending, просто тихо фейлим
-                    pass
+                    # Не удалось отправить (пользователь еще не писал боту или заблокировал его)
+                    logging.error(f"Failed to send gratitude notification to @{mention} (user_id={to_user_id}): {e}")
+                    # Сохраняем как pending, чтобы доставить позже
+                    await db.save_pending_gratitude(from_user_id, mention, text)
+                    pending.append(mention)
+                    logging.info(f"Saved as pending gratitude for @{mention} due to delivery failure")
             else:
                 # Пользователя нет в боте — сохраняем отложенную благодарность
                 await db.save_pending_gratitude(from_user_id, mention, text)
