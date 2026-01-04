@@ -17,6 +17,7 @@ from aiogram.types import (
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.base import StorageKey
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from reportlab.lib.pagesizes import A4
@@ -968,11 +969,25 @@ async def send_reminders():
 
     for user_id in users_to_notify:
         try:
+            # Устанавливаем состояние ожидания благодарностей
+            state = FSMContext(storage=dp.storage, key=StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id))
+            await state.set_state(GratitudeStates.waiting_for_gratitudes)
+            await state.update_data(gratitudes=[])
+
+            # Inline-кнопки для сохранения/отмены
+            inline_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="💾 Сохранить", callback_data="save_gratitudes"),
+                    InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_gratitudes")
+                ]
+            ])
+
             await bot.send_message(
                 user_id,
                 "🌙 Привет!\n\n"
-                "За что ты благодарен сегодня?",
-                reply_markup=main_menu
+                "За что ты благодарен сегодня?\n\n"
+                "Напиши списком, а если хочешь поблагодарить кого-то — упомяни @username",
+                reply_markup=inline_kb
             )
             sent_count += 1
             # Rate limiting: пауза между сообщениями (Telegram limit: 30 msg/sec)
