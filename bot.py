@@ -261,85 +261,16 @@ async def cmd_cancel(message: Message, state: FSMContext):
         )
 
 
-@dp.message(F.text == "💾 Сохранить", GratitudeStates.waiting_for_gratitudes)
-async def save_gratitudes(message: Message, state: FSMContext):
-    """Сохранить благодарности"""
-    data = await state.get_data()
-    gratitudes = data.get("gratitudes", [])
-
-    if not gratitudes:
-        await message.answer("📭 Ты ещё ничего не написал. Напиши хотя бы одну благодарность!")
-        return
-
-    # Сохраняем в базу (объединяет с существующими за сегодня)
-    await db.save_entry(message.from_user.id, gratitudes)
-
-    # Обрабатываем упоминания и отправляем уведомления
-    mention_status = await process_gratitude_mentions(message.from_user.id, gratitudes)
-
-    # Получаем объединённый список за сегодня для отображения
-    all_today = await db.get_today_entry(message.from_user.id)
-
-    # Получаем количество записей для поздравления
-    count = await db.get_entry_count(message.from_user.id)
-
-    # Формируем красивую карточку с ПОЛНЫМ списком за день
-    card = format_card(all_today, datetime.now())
-
-    # Сообщение с поздравлением для круглых чисел
-    congrats = ""
-    if count == 1:
-        congrats = "\n\n🎉 Это твоя первая запись! Отличное начало!"
-    elif count == 7:
-        congrats = "\n\n🔥 Неделя благодарностей! Так держать!"
-    elif count == 30:
-        congrats = "\n\n🏆 30 дней! Ты формируешь привычку!"
-    elif count % 10 == 0:
-        congrats = f"\n\n⭐ {count} записей! Отличный результат!"
-
-    await state.clear()
-
-    # Показываем добавленное количество и общее за день
-    added = len(gratitudes)
-    total = len(all_today)
-    if added == total:
-        count_msg = f"{total} благодарностей"
-    else:
-        count_msg = f"+{added}, всего за день: {total}"
-
-    # Основное сообщение с результатом
-    await message.answer(
-        f"🎉 Запись сохранена! ({count_msg}){congrats}\n\n{card}",
-        reply_markup=main_menu
-    )
-
-    # Если есть pending упоминания — показываем отдельным сообщением
-    if mention_status["pending"]:
-        pending_users = ", ".join([f"@{u}" for u in mention_status["pending"]])
-        await message.answer(
-            f"💌 {pending_users} получит твою благодарность, когда присоединится к боту\n\n"
-            f"Пригласить: https://t.me/thanksworld_bot"
-        )
-
-
 @dp.callback_query(F.data == "save_gratitudes")
 async def save_gratitudes_inline(callback: CallbackQuery, state: FSMContext):
-    """Сохранить благодарности (inline-кнопка)"""
-    data = await state.get_data()
-    gratitudes = data.get("gratitudes", [])
+    """Показать финальную карточку (данные уже сохранены автоматически)"""
+    # Получаем данные для отображения
+    all_today = await db.get_today_entry(callback.from_user.id)
 
-    if not gratitudes:
+    if not all_today:
         await callback.answer("Сначала напиши хотя бы одну благодарность!", show_alert=True)
         return
 
-    # Сохраняем в базу
-    await db.save_entry(callback.from_user.id, gratitudes)
-
-    # Обрабатываем упоминания и отправляем уведомления
-    mention_status = await process_gratitude_mentions(callback.from_user.id, gratitudes)
-
-    # Получаем данные для отображения
-    all_today = await db.get_today_entry(callback.from_user.id)
     count = await db.get_entry_count(callback.from_user.id)
     card = format_card(all_today, datetime.now())
 
@@ -356,68 +287,74 @@ async def save_gratitudes_inline(callback: CallbackQuery, state: FSMContext):
 
     await state.clear()
 
-    added = len(gratitudes)
     total = len(all_today)
-    count_msg = f"{total} благодарностей" if added == total else f"+{added}, всего за день: {total}"
 
     # Убираем inline-кнопки из предыдущего сообщения
     await callback.message.edit_reply_markup(reply_markup=None)
 
     # Основное сообщение с результатом
     await callback.message.answer(
-        f"🎉 Запись сохранена! ({count_msg}){congrats}\n\n{card}",
+        f"🎉 Готово! ({total} благодарностей){congrats}\n\n{card}",
         reply_markup=main_menu
     )
-
-    # Если есть pending упоминания — показываем отдельным сообщением
-    if mention_status["pending"]:
-        pending_users = ", ".join([f"@{u}" for u in mention_status["pending"]])
-        await callback.message.answer(
-            f"💌 {pending_users} получит твою благодарность, когда присоединится к боту\n\n"
-            f"Пригласить: https://t.me/thanksworld_bot"
-        )
 
     await callback.answer()
 
 
 @dp.callback_query(F.data == "cancel_gratitudes")
 async def cancel_gratitudes_inline(callback: CallbackQuery, state: FSMContext):
-    """Отмена записи (inline-кнопка)"""
+    """Закрыть режим записи (данные уже сохранены)"""
     await state.clear()
     await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("Действие отменено.", reply_markup=main_menu)
+    await callback.message.answer("Режим записи закрыт. Твои благодарности сохранены!", reply_markup=main_menu)
     await callback.answer()
 
 
 @dp.message(GratitudeStates.waiting_for_gratitudes)
 async def process_gratitude(message: Message, state: FSMContext):
-    """Обработка ввода благодарностей"""
+    """Обработка ввода благодарностей с автосохранением"""
     # Игнорируем команды — они не должны добавляться как благодарности
     if message.text and message.text.startswith('/'):
         return
 
-    data = await state.get_data()
-    gratitudes = data.get("gratitudes", [])
-
     # Разбиваем на строки, если пользователь прислал список
     new_items = [line.strip() for line in message.text.split("\n") if line.strip()]
-    gratitudes.extend(new_items)
 
-    await state.update_data(gratitudes=gratitudes)
+    if not new_items:
+        return
 
-    # Inline-кнопки для сохранения/отмены
+    # Сразу сохраняем в базу (автосохранение)
+    await db.save_entry(message.from_user.id, new_items)
+
+    # Обрабатываем упоминания и отправляем уведомления
+    mention_status = await process_gratitude_mentions(message.from_user.id, new_items)
+
+    # Получаем общее количество за сегодня для отображения счетчика
+    all_today = await db.get_today_entry(message.from_user.id)
+    total = len(all_today)
+
+    # Inline-кнопки для финального просмотра/отмены
     inline_kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="💾 Сохранить", callback_data="save_gratitudes"),
+            InlineKeyboardButton(text="💾 Готово", callback_data="save_gratitudes"),
             InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_gratitudes")
         ]
     ])
 
+    # Короткое подтверждение сохранения
     await message.answer(
-        f"✓ Записано: {len(gratitudes)}\n\n"
-        "Продолжай писать или сохрани.",
+        f"✅ Сохранено (+{len(new_items)}), всего за день: {total}\n\n"
+        "Продолжай писать или нажми Готово для просмотра.",
         reply_markup=inline_kb
     )
+
+    # Если есть pending упоминания — показываем отдельным сообщением
+    if mention_status["pending"]:
+        pending_users = ", ".join([f"@{u}" for u in mention_status["pending"]])
+        await message.answer(
+            f"💌 {pending_users} получит твою благодарность, когда присоединится к боту\n\n"
+            f"Пригласить: https://t.me/thanksworld_bot"
+        )
 
 
 @dp.message(Command("diary"))
