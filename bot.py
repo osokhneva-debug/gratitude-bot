@@ -921,6 +921,13 @@ async def send_reminders():
 
     for user_id in users_to_notify:
         try:
+            # Проверяем есть ли pending благодарности
+            username = await db.get_username_by_id(user_id)
+            pending_count = 0
+            if username:
+                pending = await db.get_pending_gratitudes(username)
+                pending_count = len(pending)
+
             # Устанавливаем состояние ожидания благодарностей
             state = FSMContext(storage=dp.storage, key=StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id))
             await state.set_state(GratitudeStates.waiting_for_gratitudes)
@@ -934,11 +941,16 @@ async def send_reminders():
                 ]
             ])
 
+            # Формируем текст сообщения с подсказкой о pending благодарностях
+            reminder_text = "🌙 Привет!\n\n"
+            if pending_count > 0:
+                reminder_text += f"💌 У тебя {pending_count} {'новая благодарность' if pending_count == 1 else 'новые благодарности' if pending_count < 5 else 'новых благодарностей'}!\n\n"
+            reminder_text += "За что ты благодарен сегодня?\n\n"
+            reminder_text += "Напиши списком, а если хочешь поблагодарить кого-то — упомяни @username"
+
             await bot.send_message(
                 user_id,
-                "🌙 Привет!\n\n"
-                "За что ты благодарен сегодня?\n\n"
-                "Напиши списком, а если хочешь поблагодарить кого-то — упомяни @username",
+                reminder_text,
                 reply_markup=inline_kb
             )
             sent_count += 1
