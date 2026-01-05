@@ -38,6 +38,17 @@ class Database:
                 END $$;
             """)
 
+            # Добавляем колонку shown_quote_ids для мотивационных цитат (миграция)
+            await conn.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                                   WHERE table_name='users' AND column_name='shown_quote_ids') THEN
+                        ALTER TABLE users ADD COLUMN shown_quote_ids INTEGER[] DEFAULT '{}';
+                    END IF;
+                END $$;
+            """)
+
             # Таблица записей благодарностей
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS entries (
@@ -358,4 +369,33 @@ class Database:
             await conn.execute(
                 "UPDATE pending_gratitudes SET delivered = TRUE WHERE id = $1",
                 gratitude_id
+            )
+
+    async def get_shown_quote_ids(self, user_id: int) -> List[int]:
+        """Получить список ID показанных цитат"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT shown_quote_ids FROM users WHERE user_id = $1",
+                user_id
+            )
+            return list(row['shown_quote_ids']) if row and row['shown_quote_ids'] else []
+
+    async def add_shown_quote(self, user_id: int, quote_id: int):
+        """Добавить ID показанной цитаты"""
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE users
+                SET shown_quote_ids = array_append(shown_quote_ids, $1)
+                WHERE user_id = $2
+                """,
+                quote_id, user_id
+            )
+
+    async def reset_shown_quotes(self, user_id: int):
+        """Сбросить список показанных цитат (когда все показаны)"""
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE users SET shown_quote_ids = '{}' WHERE user_id = $1",
+                user_id
             )
