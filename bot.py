@@ -873,7 +873,7 @@ async def get_random_unshown_quote(user_id: int) -> tuple[int, str]:
 
 
 async def send_motivation_messages():
-    """Отправить мотивационные сообщения пользователям (вызывается 2 раза в неделю)"""
+    """Отправить мотивационные сообщения пользователям (вызывается каждый час по вт и пт)"""
     utc_now = datetime.now(timezone.utc)
 
     # Получаем всех пользователей с их настройками
@@ -885,15 +885,13 @@ async def send_motivation_messages():
     for user_settings in users_settings:
         user_id = user_settings['user_id']
         user_hour = user_settings['hour']
-        user_minute = user_settings['minute']
         user_tz = user_settings['timezone']
 
-        # Вычисляем UTC время за 1 час до напоминания пользователя
+        # Вычисляем UTC час за 1 час до напоминания пользователя
         target_utc_hour = (user_hour - user_tz - 1 + 24) % 24
-        target_utc_minute = user_minute
 
-        # Проверяем, совпадает ли текущее UTC время с целевым (±5 минут для надежности)
-        if utc_now.hour == target_utc_hour and abs(utc_now.minute - target_utc_minute) <= 5:
+        # Проверяем, совпадает ли текущий UTC час с целевым
+        if utc_now.hour == target_utc_hour:
             try:
                 # Получаем случайную непоказанную цитату
                 quote_id, quote_text = await get_random_unshown_quote(user_id)
@@ -1195,7 +1193,8 @@ async def main():
     scheduler.add_job(send_reminders, "cron", minute="*")
 
     # Мотивационные сообщения 2 раза в неделю (вторник=1, пятница=4)
-    scheduler.add_job(send_motivation_messages, "cron", day_of_week="1,4", minute="*")
+    # Проверяем каждый час в начале часа (minute=0)
+    scheduler.add_job(send_motivation_messages, "cron", day_of_week="1,4", minute="0")
 
     scheduler.start()
 
