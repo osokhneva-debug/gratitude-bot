@@ -399,3 +399,17 @@ class Database:
                 "UPDATE users SET shown_quote_ids = '{}' WHERE user_id = $1",
                 user_id
             )
+
+    async def get_active_users_yesterday(self) -> int:
+        """Получить количество активных пользователей за вчерашний день"""
+        async with self.pool.acquire() as conn:
+            yesterday = datetime.now().date() - timedelta(days=1)
+            result = await conn.fetchval(
+                """
+                SELECT COUNT(DISTINCT user_id)
+                FROM entries
+                WHERE DATE(created_at) = $1
+                """,
+                yesterday
+            )
+            return int(result) if result else 0

@@ -512,6 +512,7 @@ async def cmd_admin(message: Message):
 
     stats = await db.get_stats()
     user_ids = await db.get_all_users()
+    active_yesterday = await db.get_active_users_yesterday()
 
     # Получаем информацию о пользователях
     users_info = []
@@ -526,10 +527,13 @@ async def cmd_admin(message: Message):
 
     users_list = "\n".join(users_info) if users_info else "Пока нет пользователей"
 
+    yesterday_date = (datetime.now() - timedelta(days=1)).strftime('%d.%m.%Y')
+
     await message.answer(
         f"📊 <b>Статистика бота</b>\n\n"
-        f"👥 Пользователей: {stats['users']}\n"
-        f"📝 Записей: {stats['entries']}\n\n"
+        f"👥 Всего пользователей: {stats['users']}\n"
+        f"📝 Всего записей: {stats['entries']}\n"
+        f"✅ Активных вчера ({yesterday_date}): {active_yesterday}\n\n"
         f"<b>Пользователи:</b>\n{users_list}",
         parse_mode="HTML"
     )
