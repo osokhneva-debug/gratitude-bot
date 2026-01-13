@@ -511,32 +511,39 @@ async def cmd_admin(message: Message):
         return  # Молча игнорируем для не-админов
 
     stats = await db.get_stats()
-    user_ids = await db.get_all_users()
     active_yesterday = await db.get_active_users_yesterday()
-
-    # Получаем информацию о пользователях
-    users_info = []
-    for user_id in user_ids:
-        try:
-            chat = await bot.get_chat(user_id)
-            name = chat.full_name or "Без имени"
-            username = f"@{chat.username}" if chat.username else ""
-            users_info.append(f"• {name} {username} (ID: {user_id})")
-        except:
-            users_info.append(f"• ID: {user_id}")
-
-    users_list = "\n".join(users_info) if users_info else "Пока нет пользователей"
-
     yesterday_date = (datetime.now() - timedelta(days=1)).strftime('%d.%m.%Y')
 
+    # Основная статистика
     await message.answer(
         f"📊 <b>Статистика бота</b>\n\n"
         f"👥 Всего пользователей: {stats['users']}\n"
         f"📝 Всего записей: {stats['entries']}\n"
-        f"✅ Активных вчера ({yesterday_date}): {active_yesterday}\n\n"
-        f"<b>Пользователи:</b>\n{users_list}",
+        f"✅ Активных вчера ({yesterday_date}): {active_yesterday}",
         parse_mode="HTML"
     )
+
+    # Список пользователей - отдельным сообщением с ограничением
+    user_ids = await db.get_all_users()
+
+    if user_ids:
+        users_info = []
+        for user_id in user_ids[:50]:  # Лимит 50 пользователей на сообщение
+            try:
+                chat = await bot.get_chat(user_id)
+                name = chat.full_name or "Без имени"
+                username = f"@{chat.username}" if chat.username else ""
+                users_info.append(f"• {name} {username} (ID: {user_id})")
+            except:
+                users_info.append(f"• ID: {user_id}")
+
+        users_list = "\n".join(users_info)
+        more_text = f"\n\n<i>...и ещё {len(user_ids) - 50}</i>" if len(user_ids) > 50 else ""
+
+        await message.answer(
+            f"<b>Пользователи:</b>\n{users_list}{more_text}",
+            parse_mode="HTML"
+        )
 
 
 @dp.message(Command("myid"))
