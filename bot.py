@@ -539,6 +539,17 @@ async def cmd_admin(message: Message):
     )
 
 
+@dp.message(Command("myid"))
+async def cmd_myid(message: Message):
+    """Показать свой Telegram ID"""
+    await message.answer(
+        f"🆔 Твой Telegram ID: <code>{message.from_user.id}</code>\n\n"
+        f"Username: @{message.from_user.username or 'не установлен'}\n"
+        f"Имя: {message.from_user.full_name}",
+        parse_mode="HTML"
+    )
+
+
 @dp.message(Command("help"))
 async def cmd_help(message: Message):
     """Показать справку"""
