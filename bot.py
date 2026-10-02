@@ -150,6 +150,7 @@ class GratitudeStates(StatesGroup):
     waiting_for_current_time = State()  # Ожидание ввода текущего времени для расчёта часового пояса
     waiting_for_gratitudes = State()
     waiting_for_time = State()
+    onboarding_first_entry = State()  # Ожидание первой записи в онбординге
 
 
 def parse_time(text: str) -> tuple[int, int]:
@@ -192,29 +193,55 @@ async def cmd_start(message: Message, state: FSMContext):
 
     if is_new:
         # Новый пользователь — показываем онбординг
+
+        # ШАГ 1: Приветствие с value proposition (фокус на выгоде, не на функциях)
         await message.answer(
-            "🙏 Привет! Я — твой Дневник Благодарностей.\n\n"
-            "Практика благодарности помогает замечать хорошее "
-            "в жизни и чувствовать себя счастливее.\n\n"
-            "Каждый день я буду напоминать тебе записать, "
-            "за что ты благодарен. Это займёт пару минут.\n\n"
-            "Этот бот создан Ольгой Сохневой — автором канала "
-            "«<a href='https://t.me/remote_love_2'>Любовь на удаленке</a>». "
-            "Буду рада твоей подписке на канал — там эксперименты с ИИ, "
-            "карьерой и привычками, которые вдохновляют пробовать новое "
-            "и выстраивать жизнь под себя.",
+            "🙏 Привет! Я помогу тебе чувствовать себя счастливее.\n\n"
+            "<b>Как это работает?</b>\n"
+            "Каждый вечер ты будешь отвечать на один вопрос:\n"
+            "«За что я благодарен сегодня?»\n\n"
+            "Это займёт 30 секунд, но изменит то, как ты видишь свою жизнь.",
             reply_markup=ReplyKeyboardRemove(),
+            parse_mode="HTML"
+        )
+
+        await asyncio.sleep(2)
+
+        # ШАГ 2: Социальное доказательство (научные факты)
+        await message.answer(
+            "💡 <b>Почему это работает?</b>\n\n"
+            "Исследования показывают:\n"
+            "• Снижает стресс на 23%\n"
+            "• Улучшает сон и настроение\n"
+            "• Помогает легче переживать трудности\n\n"
+            "Твой мозг буквально меняется — учится замечать хорошее, а не только проблемы.",
+            parse_mode="HTML"
+        )
+
+        await asyncio.sleep(2)
+
+        # ШАГ 3: Призыв к действию — первая запись (самое важное!)
+        await state.set_state(GratitudeStates.onboarding_first_entry)
+
+        skip_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭️ Пропустить", callback_data="skip_onboarding")]
+        ])
+
+        await message.answer(
+            "✨ <b>Давай попробуем прямо сейчас!</b>\n\n"
+            "За что ты благодарен сегодня? Напиши одну вещь — большую или маленькую.\n\n"
+            "<i>Примеры:</i>\n"
+            "• Вкусный завтрак\n"
+            "• Поддержка друга\n"
+            "• Солнечная погода\n"
+            "• То, что у меня есть крыша над головой",
             parse_mode="HTML",
-            disable_web_page_preview=True
+            reply_markup=skip_keyboard
         )
 
         # Проверяем отложенные благодарности для нового пользователя
         if username:
             await deliver_pending_gratitudes(message.from_user.id, username)
-
-        # Запрашиваем часовой пояс
-        await asyncio.sleep(1)
-        await ask_timezone(message, state)
     else:
         # Вернувшийся пользователь
         await message.answer(
